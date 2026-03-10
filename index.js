@@ -197,7 +197,16 @@ program
         }
     });
 
+// ─── ZEN MODE ───────────────────────────
+program
+    .command('zen')
+    .description('Buka Zen Mode - focus session fullscreen')
+    .action(async () => {
+        const { execFileSync } = await import('child_process');
+        const { fileURLToPath } = await import('url');
+        execFileSync('npx', ['tsx', fileURLToPath(new URL('./zen.jsx', import.meta.url))], { stdio: 'inherit' });
+    });
 
 
-program.name('todo').description('CLI To-Do List').version('1.0.0');
+program.name('todo').description('CLI To-Do List').version('2.0.0');
 program.parse();

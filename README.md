@@ -7,6 +7,7 @@ A simple, interactive, and beautifully designed command-line interface (CLI) app
 - **Interactive Prompts**: Easily add, complete, and remove tasks with interactive menus using `@inquirer/prompts`.
 - **Beautiful UI**: Colorful and well-formatted table outputs using `chalk` and `cli-table3`.
 - **Nerd Font Icons**: Visually appealing icons for task statuses.
+- **Zen Mode**: A fullscreen focus session with a Pomodoro timer and interactive task management built with `ink`.
 - **Data Persistence**: Tasks are saved locally and persistently in your system.
 
 ## 🚀 Installation (Global)
@@ -49,6 +50,30 @@ You can install this CLI globally on your system to access the `todo` command fr
    todo --help
    ```
 
+## 🔄 Updating the CLI
+
+To update the globally installed `todo-cli` to the latest version, follow these steps:
+
+1. **Navigate to your cloned repository**:
+   ```bash
+   cd path/to/todo-cli
+   ```
+
+2. **Pull the latest changes**:
+   ```bash
+   git pull origin main
+   ```
+
+3. **Reinstall dependencies** (if needed):
+   ```bash
+   npm install
+   ```
+
+4. **Reinstall the package globally**:
+   ```bash
+   npm install -g .
+   ```
+
 ## 🛠️ Usage
 
 Once installed globally, you can use the `todo` command seamlessly from any directory.
@@ -87,6 +112,12 @@ Once installed globally, you can use the `todo` command seamlessly from any dire
   todo remove
   # or
   todo rm
+  ```
+
+- **Zen Mode**
+  Opens a fullscreen immersive Zen mode where you can manage your tasks, start a Pomodoro focus timer, and view a large clock.
+  ```bash
+  todo zen
   ```
 
 ## 📂 Data Storage
