@@ -6,12 +6,54 @@ import fs from 'fs';
 import path from 'path';
 import figlet from 'figlet';
 
-// ─── Storage ──────────────────────────────────────
+// ─── Storage (project-aware) ──────────────────────
 const DIR = path.join(process.env.HOME, '.local', 'share', 'todo-cli');
-const FILE = path.join(DIR, 'tasks.json');
+const ACTIVE_FILE = path.join(DIR, 'active-project.json');
+const PROJECTS_DIR = path.join(DIR, 'projects');
 if (!fs.existsSync(DIR)) fs.mkdirSync(DIR, { recursive: true });
-const load = () => fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : [];
-const save = (t) => fs.writeFileSync(FILE, JSON.stringify(t, null, 2));
+
+function getActiveProject() {
+  if (!fs.existsSync(ACTIVE_FILE)) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(ACTIVE_FILE, 'utf8'));
+    return data.name || null;
+  } catch { return null; }
+}
+
+function setActiveProject(name) {
+  if (!name || name === 'global') {
+    if (fs.existsSync(ACTIVE_FILE)) fs.unlinkSync(ACTIVE_FILE);
+  } else {
+    fs.writeFileSync(ACTIVE_FILE, JSON.stringify({ name }, null, 2));
+  }
+}
+
+function getTaskFile(projectName) {
+  if (!projectName) return path.join(DIR, 'tasks.json');
+  return path.join(PROJECTS_DIR, projectName, 'tasks.json');
+}
+
+function listProjects() {
+  if (!fs.existsSync(PROJECTS_DIR)) return [];
+  return fs.readdirSync(PROJECTS_DIR).filter(f =>
+    fs.statSync(path.join(PROJECTS_DIR, f)).isDirectory()
+  );
+}
+
+function load(projectName) {
+  const proj = projectName !== undefined ? projectName : getActiveProject();
+  const file = getTaskFile(proj);
+  if (!fs.existsSync(file)) return [];
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function save(t, projectName) {
+  const proj = projectName !== undefined ? projectName : getActiveProject();
+  const file = getTaskFile(proj);
+  const dir = path.dirname(file);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(t, null, 2));
+}
 
 // ─── Nerd Font Icons ──────────────────────────────
 const I = {
@@ -24,6 +66,7 @@ const I = {
   play: '\uf04b',   //  play
   reset: '\uebb0',   //  redo
   tasks: '\uf0ae',   //  tasks
+  project: '\uf07c', //  folder-open
 };
 
 // ─── POMODORO TIMER ───────────────────────────────
@@ -115,6 +158,9 @@ function ZenApp() {
   const H = stdout.rows || 30;
   const colW = Math.floor((W - 4) / 2);
 
+  // Project state
+  const [activeProject, setActiveProjectState] = useState(getActiveProject());
+
   const [tasks, setTasks] = useState(load());
   const [cursor, setCursor] = useState(0);
   const [mode, setMode] = useState('normal'); // 'normal' | 'add'
@@ -125,6 +171,16 @@ function ZenApp() {
 
   const done = tasks.filter(t => t.done).length;
   const flash = (msg) => { setMessage(msg); setTimeout(() => setMessage(''), 2000); };
+
+  // Switch active project and reload tasks
+  const switchProject = (projName) => {
+    setActiveProject(projName);
+    setActiveProjectState(projName);
+    setTasks(load(projName));
+    setCursor(0);
+    const label = projName || 'global';
+    flash(`  ${I.project}  Switched to: ${label}`);
+  };
 
   useInput((char, key) => {
     // ── Add mode ────────────────────────────────
@@ -162,10 +218,23 @@ function ZenApp() {
       setCursor(c => Math.min(c, updated.length - 1));
       flash(`  Deleted: "${t?.text}"`);
     }
+    if (char === 'p') {
+      // Cycle through projects: global → project1 → project2 → ... → global
+      // Computed fresh each time to pick up newly created projects
+      const currentProjects = [null, ...listProjects()];
+      const idx = currentProjects.indexOf(activeProject);
+      const next = currentProjects[(idx + 1) % currentProjects.length];
+      switchProject(next);
+    }
     if (char === 'f') pomo.toggle();
     if (char === 'r') pomo.reset();
     if (char === 'q' || (key.ctrl && char === 'c')) process.exit(0);
   });
+
+  // Project label for header
+  const projectLabel = activeProject
+    ? `ZEN MODE  ${I.project} ${activeProject}`
+    : 'ZEN MODE';
 
   // ─── RENDER ────────────────────────────────────
   return (
@@ -173,7 +242,7 @@ function ZenApp() {
 
       {/* Header */}
       <Box justifyContent="space-between" paddingX={2} paddingY={0} borderStyle="single" borderColor="gray" borderTop={false} borderLeft={false} borderRight={false}>
-        <Text color="cyan" bold>{I.zen}  ZEN MODE</Text>
+        <Text color="cyan" bold>{I.zen}  {projectLabel}</Text>
         <Text color="gray">{clock.date}</Text>
       </Box>
 
@@ -270,7 +339,7 @@ function ZenApp() {
           <Text color="green">{message}</Text>
         ) : (
           <Text color="white" dimColor>
-            [↑↓] Navigate  [Space] Toggle Done  [A] Add  [D] Delete  [F] Focus Timer  [R] Reset  [Q] Quit
+            [↑↓] Navigate  [Space] Toggle  [A] Add  [D] Delete  [P] Switch Project  [F] Focus  [R] Reset  [Q] Quit
           </Text>
         )}
       </Box>

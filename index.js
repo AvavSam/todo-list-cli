@@ -23,17 +23,57 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-// Storage
+// ─── Storage ───────────────────────────────────────
 const DIR = path.join(process.env.HOME, '.local', 'share', 'todo-cli');
-const FILE = path.join(DIR, 'tasks.json');
+const ACTIVE_FILE = path.join(DIR, 'active-project.json');
+const PROJECTS_DIR = path.join(DIR, 'projects');
 if (!fs.existsSync(DIR)) fs.mkdirSync(DIR, { recursive: true });
 
-function load() {
-    if (!fs.existsSync(FILE)) return [];
-    return JSON.parse(fs.readFileSync(FILE, 'utf8'));
+function getActiveProject() {
+    if (!fs.existsSync(ACTIVE_FILE)) return null;
+    try {
+        const data = JSON.parse(fs.readFileSync(ACTIVE_FILE, 'utf8'));
+        return data.name || null;
+    } catch { return null; }
 }
-function save(tasks) {
-    fs.writeFileSync(FILE, JSON.stringify(tasks, null, 2));
+
+function setActiveProject(name) {
+    if (!name || name === 'global') {
+        if (fs.existsSync(ACTIVE_FILE)) fs.unlinkSync(ACTIVE_FILE);
+    } else {
+        fs.writeFileSync(ACTIVE_FILE, JSON.stringify({ name }, null, 2));
+    }
+}
+
+function getProjectDir(name) {
+    return path.join(PROJECTS_DIR, name);
+}
+
+function getTaskFile(projectName) {
+    if (!projectName) return path.join(DIR, 'tasks.json');
+    return path.join(getProjectDir(projectName), 'tasks.json');
+}
+
+function listProjects() {
+    if (!fs.existsSync(PROJECTS_DIR)) return [];
+    return fs.readdirSync(PROJECTS_DIR).filter(f =>
+        fs.statSync(path.join(PROJECTS_DIR, f)).isDirectory()
+    );
+}
+
+function load(projectName) {
+    const proj = projectName !== undefined ? projectName : getActiveProject();
+    const file = getTaskFile(proj);
+    if (!fs.existsSync(file)) return [];
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function save(tasks, projectName) {
+    const proj = projectName !== undefined ? projectName : getActiveProject();
+    const file = getTaskFile(proj);
+    const dir = path.dirname(file);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(tasks, null, 2));
 }
 
 // Nerd Font Icons
@@ -45,14 +85,145 @@ const I = {
     trash: '\uf1f8',  //  trash
     check: '\uf00c',  //  check
     list: '\uf03a',  //  list
+    project: '\uf07c', //  folder-open
+    star: '\uf005',    //  star
 };
 
 function printHeader() {
+    const active = getActiveProject();
+    const label = active ? `TODO CLI ${chalk.gray('•')} ${chalk.magenta(active)}` : 'TODO CLI';
     console.log('');
-    console.log(chalk.cyan.bold(`  ${I.header}  TODO CLI`));
+    console.log(chalk.cyan.bold(`  ${I.header}  ${label}`));
     console.log(chalk.gray('  ──────────────────────────'));
     console.log('');
 }
+
+// ─── PROJECT ───────────────────────────────────────
+// Project name validation
+const VALID_NAME = /^[a-zA-Z0-9_-]+$/;
+function validateProjectName(name) {
+    if (name === 'global') {
+        console.log(chalk.red(`  ${I.trash}  "global" adalah nama yang sudah dipakai.\n`));
+        return false;
+    }
+    if (!VALID_NAME.test(name)) {
+        console.log(chalk.red(`  ${I.trash}  Nama project hanya boleh huruf, angka, "-", dan "_".\n`));
+        return false;
+    }
+    return true;
+}
+
+const proj = program
+    .command('project')
+    .description('Kelola project');
+
+proj
+    .command('create <name>')
+    .description('Buat project baru')
+    .action((name) => {
+        printHeader();
+        if (!validateProjectName(name)) return;
+        const dir = getProjectDir(name);
+        if (fs.existsSync(dir)) {
+            console.log(chalk.yellow(`  ${I.project}  Project "${name}" sudah ada.\n`));
+            return;
+        }
+        fs.mkdirSync(dir, { recursive: true });
+        save([], name);
+        console.log(chalk.green(`  ${I.check}  Project "${name}" berhasil dibuat!\n`));
+    });
+
+proj
+    .command('list')
+    .description('Tampilkan semua project')
+    .action(() => {
+        printHeader();
+        const projects = listProjects();
+        const active = getActiveProject();
+
+        console.log(chalk.cyan(`  ${I.project}  Projects:\n`));
+
+        // Global entry (always shown)
+        const globalMark = !active ? chalk.cyan(` ${I.star} `) : '   ';
+        const globalColor = !active ? chalk.cyan : chalk.white;
+        const globalTasks = load(null);
+        const globalDone = globalTasks.filter(t => t.done).length;
+        console.log(globalColor(`  ${globalMark} global  ${chalk.gray(`(${globalDone}/${globalTasks.length} tasks)`)}`));
+
+        // Project entries
+        if (!projects.length) {
+            console.log(chalk.gray(`\n  Belum ada project lain. Gunakan \`todo project create <name>\`.`));
+        }
+        projects.forEach(p => {
+            const isActive = p === active;
+            const mark = isActive ? chalk.cyan(` ${I.star} `) : '   ';
+            const color = isActive ? chalk.cyan : chalk.white;
+            const tasks = load(p);
+            const done = tasks.filter(t => t.done).length;
+            console.log(color(`  ${mark} ${p}  ${chalk.gray(`(${done}/${tasks.length} tasks)`)}`));
+        });
+        console.log('');
+    });
+
+proj
+    .command('switch <name>')
+    .description('Pindah ke project (gunakan "global" untuk tanpa project)')
+    .action((name) => {
+        printHeader();
+        if (name === 'global') {
+            setActiveProject(null);
+            console.log(chalk.green(`  ${I.check}  Beralih ke task global.\n`));
+            return;
+        }
+
+        const dir = getProjectDir(name);
+        if (!fs.existsSync(dir)) {
+            console.log(chalk.red(`  ${I.trash}  Project "${name}" tidak ditemukan.\n`));
+            return;
+        }
+        setActiveProject(name);
+        console.log(chalk.green(`  ${I.check}  Beralih ke project "${name}".\n`));
+    });
+
+proj
+    .command('delete <name>')
+    .description('Hapus project')
+    .action(async (name) => {
+        printHeader();
+        const dir = getProjectDir(name);
+        if (!fs.existsSync(dir)) {
+            console.log(chalk.red(`  ${I.trash}  Project "${name}" tidak ditemukan.\n`));
+            return;
+        }
+
+        const tasks = load(name);
+        const ok = await confirm({
+            message: `Hapus project "${name}" beserta ${tasks.length} task?`,
+            default: false,
+        });
+
+        if (ok) {
+            fs.rmSync(dir, { recursive: true, force: true });
+            // If this was the active project, switch to global
+            if (getActiveProject() === name) setActiveProject(null);
+            console.log(chalk.red(`\n  ${I.trash}  Project "${name}" dihapus.\n`));
+        } else {
+            console.log(chalk.gray('\n  Dibatalkan.\n'));
+        }
+    });
+
+proj
+    .action(() => {
+        printHeader();
+        const active = getActiveProject();
+        if (active) {
+            const tasks = load(active);
+            const done = tasks.filter(t => t.done).length;
+            console.log(chalk.cyan(`  ${I.project}  Project aktif: ${chalk.bold(active)}  ${chalk.gray(`(${done}/${tasks.length} tasks)`)}\n`));
+        } else {
+            console.log(chalk.gray(`  ${I.project}  Tidak ada project aktif (menggunakan task global).\n`));
+        }
+    });
 
 // ─── LIST ──────────────────────────────────────────
 program
@@ -208,5 +379,5 @@ program
     });
 
 
-program.name('todo').description('CLI To-Do List').version('2.0.0');
+program.name('todo').description('CLI To-Do List').version('3.0.0');
 program.parse();
